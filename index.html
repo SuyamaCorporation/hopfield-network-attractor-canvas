@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hopfield Network Memory Attractor Canvas</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Segoe UI', system-ui, sans-serif; }
+  .grid-cell {
+    cursor: pointer;
+    transition: background-color 0.1s;
+    border: 1px solid #374151;
+    box-sizing: border-box;
+  }
+  .grid-cell:hover { opacity: 0.8; }
+  .cell-on { background-color: #e5e7eb; }
+  .cell-off { background-color: #1f2937; }
+  .cell-updating { animation: flash 0.15s ease; }
+  @keyframes flash { 0%,100%{} 50%{opacity:0.3;} }
+  canvas { display: block; }
+  .weight-cell { font-size: 8px; }
+</style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+
+<div class="max-w-4xl mx-auto px-4 py-8">
+  <header class="text-center mb-6">
+    <h1 class="text-3xl font-bold text-indigo-400 mb-1">Hopfield Network Attractor</h1>
+    <p class="text-gray-400 text-sm">5×5 neural grid — store patterns and watch memory retrieval</p>
+  </header>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+
+    <!-- Training Phase -->
+    <div class="bg-gray-800 rounded-2xl p-5">
+      <h2 class="font-bold text-indigo-300 mb-3">Phase 1: Store Patterns</h2>
+      <div class="text-xs text-gray-400 mb-3">Click cells to draw a pattern, then press "Store". Up to 4 patterns.</div>
+
+      <!-- Drawing grid -->
+      <div class="flex justify-center mb-3">
+        <div id="draw-grid" class="inline-grid gap-0" style="grid-template-columns: repeat(5, 40px);"
+          aria-label="Drawing grid" role="grid"></div>
+      </div>
+
+      <!-- Preset shapes -->
+      <div class="flex flex-wrap gap-1 mb-3">
+        <span class="text-xs text-gray-500">Presets:</span>
+        <button onclick="loadPreset('X')" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded" aria-label="Load X pattern">X</button>
+        <button onclick="loadPreset('plus')" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded" aria-label="Load plus pattern">+</button>
+        <button onclick="loadPreset('Z')" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded" aria-label="Load Z pattern">Z</button>
+        <button onclick="loadPreset('border')" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded" aria-label="Load border pattern">□</button>
+        <button onclick="loadPreset('diag')" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded" aria-label="Load diagonal pattern">╲</button>
+        <button onclick="clearDraw()" class="text-xs bg-red-900 hover:bg-red-800 px-2 py-1 rounded" aria-label="Clear drawing">Clear</button>
+      </div>
+
+      <button onclick="storePattern()"
+        class="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-2 rounded-xl transition-colors mb-3"
+        id="store-btn" aria-label="Store current pattern">Store Pattern</button>
+
+      <!-- Stored patterns -->
+      <div class="text-xs text-gray-400 mb-2">Stored patterns: <span id="pattern-count" class="text-indigo-300 font-bold">0/4</span></div>
+      <div id="stored-patterns" class="flex gap-2 flex-wrap"></div>
+      <button onclick="clearAllPatterns()" class="mt-2 text-xs text-red-400 hover:text-red-300" aria-label="Clear all stored patterns">Clear All Patterns</button>
+    </div>
+
+    <!-- Recall Phase -->
+    <div class="bg-gray-800 rounded-2xl p-5">
+      <h2 class="font-bold text-green-300 mb-3">Phase 2: Recall</h2>
+      <div class="text-xs text-gray-400 mb-3">Add noise to the stored patterns, then run the network.</div>
+
+      <!-- Noise Slider -->
+      <div class="flex items-center gap-3 mb-3">
+        <label class="text-sm text-gray-400 w-24" for="noise-slider">Noise:</label>
+        <input type="range" id="noise-slider" min="0" max="50" value="20"
+          class="flex-1 accent-indigo-500" aria-label="Noise percentage">
+        <span id="noise-val" class="text-indigo-300 font-bold w-10 text-right">20%</span>
+      </div>
+      <div class="flex gap-2 mb-3">
+        <button onclick="addNoise()" id="noise-btn"
+          class="flex-1 bg-yellow-700 hover:bg-yellow-600 disabled:opacity-50 text-white font-bold py-2 rounded-xl transition-colors"
+          aria-label="Add noise to input pattern">Add Noise</button>
+        <select id="noise-source" class="bg-gray-700 border border-gray-600 rounded-lg px-2 text-sm text-white" aria-label="Source pattern for noise">
+          <option value="0">Pattern 1</option>
+          <option value="1">Pattern 2</option>
+          <option value="2">Pattern 3</option>
+          <option value="3">Pattern 4</option>
+        </select>
+      </div>
+
+      <!-- Recall grid -->
+      <div class="flex justify-center mb-3">
+        <div id="recall-grid" class="inline-grid gap-0" style="grid-template-columns: repeat(5, 40px);"
+          aria-label="Recall grid" role="grid"></div>
+      </div>
+
+      <!-- Controls -->
+      <div class="flex gap-2 mb-3">
+        <select id="update-mode" class="bg-gray-700 border border-gray-600 rounded-lg px-2 text-sm text-white" aria-label="Update mode">
+          <option value="async">Async Update</option>
+          <option value="sync">Sync Update</option>
+        </select>
+        <input type="range" id="speed-slider" min="1" max="10" value="5"
+          class="flex-1 accent-green-500" aria-label="Animation speed">
+        <span class="text-xs text-gray-400 w-16">Speed: <span id="speed-val">5</span></span>
+      </div>
+
+      <div class="flex gap-2">
+        <button onclick="runRecall()" id="run-btn"
+          class="flex-1 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white font-bold py-2 rounded-xl transition-colors"
+          aria-label="Run network recall">▶ Run</button>
+        <button onclick="stopRecall()" id="stop-btn"
+          class="bg-gray-700 hover:bg-gray-600 text-white font-bold px-4 py-2 rounded-xl transition-colors"
+          aria-label="Stop recall">■ Stop</button>
+        <button onclick="resetRecall()"
+          class="bg-gray-700 hover:bg-gray-600 text-white font-bold px-4 py-2 rounded-xl transition-colors"
+          aria-label="Reset recall grid">Reset</button>
+      </div>
+
+      <!-- Status -->
+      <div id="recall-status" class="mt-3 text-sm text-gray-400 text-center"></div>
+    </div>
+  </div>
+
+  <!-- Energy Plot & Side-by-side comparison -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
+    <!-- Energy plot -->
+    <div class="lg:col-span-2 bg-gray-800 rounded-2xl p-5">
+      <h2 class="font-bold text-yellow-300 text-sm mb-3">Energy Function  <span class="font-normal text-gray-400">E = −½ sᵀWs</span></h2>
+      <canvas id="energy-canvas" width="480" height="160" aria-label="Energy convergence plot"
+        class="w-full rounded-lg bg-gray-900"></canvas>
+      <div class="mt-2 flex gap-4 text-xs text-gray-400">
+        <span>Steps: <span id="step-count" class="text-white font-bold">0</span></span>
+        <span>Energy: <span id="energy-val" class="text-yellow-300 font-bold">—</span></span>
+        <span id="converged-label" class="text-green-400 font-bold hidden">✓ Converged</span>
+      </div>
+    </div>
+
+    <!-- Pattern comparison -->
+    <div class="bg-gray-800 rounded-2xl p-5">
+      <h2 class="font-bold text-purple-300 text-sm mb-3">Pattern Comparison</h2>
+      <div class="space-y-3">
+        <div>
+          <div class="text-xs text-gray-400 mb-1">Target (stored)</div>
+          <div id="compare-target" class="inline-grid gap-0" style="grid-template-columns: repeat(5, 20px);"></div>
+        </div>
+        <div>
+          <div class="text-xs text-gray-400 mb-1">Input (noisy)</div>
+          <div id="compare-input" class="inline-grid gap-0" style="grid-template-columns: repeat(5, 20px);"></div>
+        </div>
+        <div>
+          <div class="text-xs text-gray-400 mb-1">Recalled</div>
+          <div id="compare-recalled" class="inline-grid gap-0" style="grid-template-columns: repeat(5, 20px);"></div>
+        </div>
+        <div id="match-label" class="text-xs font-bold"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Weight Matrix -->
+  <details class="bg-gray-800 rounded-2xl p-5">
+    <summary class="cursor-pointer font-bold text-gray-300 hover:text-white text-sm">Weight Matrix (25×25 heatmap)</summary>
+    <div class="mt-3 overflow-x-auto">
+      <canvas id="weight-canvas" width="500" height="500" aria-label="Weight matrix heatmap"
+        class="rounded-lg" style="max-width:100%;"></canvas>
+    </div>
+  </details>
+</div>
+
+<script>
+// ─── CONSTANTS ────────────────────────────────────────────────────────
+const N = 25; // 5×5 neurons
+const GRID_SIZE = 5;
+
+// ─── STATE ────────────────────────────────────────────────────────────
+let drawState = new Array(N).fill(-1);  // +1 or -1
+let recallState = new Array(N).fill(-1);
+let noisyInput = new Array(N).fill(-1);
+let storedPatterns = [];   // [[+1,-1,...], ...]
+let weightMatrix = new Array(N * N).fill(0); // flat 25x25
+let energyHistory = [];
+let recallRunning = false;
+let recallTimer = null;
+let stepCount = 0;
+
+// ─── PRESETS ─────────────────────────────────────────────────────────
+const PRESETS = {
+  'X': [
+    1,-1,-1,-1,1,
+   -1, 1,-1, 1,-1,
+   -1,-1, 1,-1,-1,
+   -1, 1,-1, 1,-1,
+    1,-1,-1,-1, 1],
+  'plus': [
+   -1,-1, 1,-1,-1,
+   -1,-1, 1,-1,-1,
+    1, 1, 1, 1, 1,
+   -1,-1, 1,-1,-1,
+   -1,-1, 1,-1,-1],
+  'Z': [
+    1, 1, 1, 1, 1,
+   -1,-1,-1, 1,-1,
+   -1,-1, 1,-1,-1,
+   -1, 1,-1,-1,-1,
+    1, 1, 1, 1, 1],
+  'border': [
+    1, 1, 1, 1, 1,
+    1,-1,-1,-1, 1,
+    1,-1,-1,-1, 1,
+    1,-1,-1,-1, 1,
+    1, 1, 1, 1, 1],
+  'diag': [
+    1,-1,-1,-1,-1,
+   -1, 1,-1,-1,-1,
+   -1,-1, 1,-1,-1,
+   -1,-1,-1, 1,-1,
+   -1,-1,-1,-1, 1],
+};
+
+function loadPreset(name) {
+  drawState = [...PRESETS[name]];
+  renderDrawGrid();
+}
+
+function clearDraw() {
+  drawState = new Array(N).fill(-1);
+  renderDrawGrid();
+}
+
+// ─── GRID RENDERING ───────────────────────────────────────────────────
+function makeGrid(containerId, stateArr, size, clickable, onCellClick) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  container.style.gridTemplateColumns = `repeat(${GRID_SIZE}, ${size}px)`;
+  for (let i = 0; i < N; i++) {
+    const cell = document.createElement('div');
+    cell.className = `grid-cell ${stateArr[i] === 1 ? 'cell-on' : 'cell-off'}`;
+    cell.style.width = cell.style.height = size + 'px';
+    cell.setAttribute('role', 'gridcell');
+    cell.setAttribute('aria-label', `Cell ${i} ${stateArr[i] === 1 ? 'on' : 'off'}`);
+    if (clickable) {
+      cell.onclick = () => { onCellClick(i); };
+    }
+    container.appendChild(cell);
+  }
+}
+
+function updateGridCell(containerId, i, val) {
+  const container = document.getElementById(containerId);
+  const cell = container.children[i];
+  if (!cell) return;
+  cell.className = `grid-cell ${val === 1 ? 'cell-on' : 'cell-off'}`;
+}
+
+function renderDrawGrid() {
+  makeGrid('draw-grid', drawState, 40, true, i => {
+    drawState[i] = drawState[i] === 1 ? -1 : 1;
+    updateGridCell('draw-grid', i, drawState[i]);
+  });
+}
+
+function renderRecallGrid() {
+  makeGrid('recall-grid', recallState, 40, true, i => {
+    recallState[i] = recallState[i] === 1 ? -1 : 1;
+    updateGridCell('recall-grid', i, recallState[i]);
+  });
+}
+
+function renderMiniGrid(containerId, stateArr) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  container.style.gridTemplateColumns = `repeat(${GRID_SIZE}, 20px)`;
+  stateArr.forEach(v => {
+    const cell = document.createElement('div');
+    cell.className = `grid-cell ${v === 1 ? 'cell-on' : 'cell-off'}`;
+    cell.style.width = cell.style.height = '20px';
+    container.appendChild(cell);
+  });
+}
+
+function renderStoredPatterns() {
+  const area = document.getElementById('stored-patterns');
+  area.innerHTML = '';
+  storedPatterns.forEach((pat, idx) => {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'relative';
+    const grid = document.createElement('div');
+    grid.className = 'inline-grid gap-0 border border-indigo-500 rounded';
+    grid.style.gridTemplateColumns = `repeat(${GRID_SIZE}, 12px)`;
+    pat.forEach(v => {
+      const cell = document.createElement('div');
+      cell.className = `grid-cell ${v === 1 ? 'cell-on' : 'cell-off'}`;
+      cell.style.width = cell.style.height = '12px';
+      grid.appendChild(cell);
+    });
+    const label = document.createElement('div');
+    label.className = 'text-xs text-gray-400 text-center mt-1';
+    label.textContent = `P${idx+1}`;
+    const delBtn = document.createElement('button');
+    delBtn.className = 'absolute -top-1 -right-1 bg-red-700 text-white rounded-full w-3 h-3 text-xs flex items-center justify-center leading-none';
+    delBtn.textContent = '×';
+    delBtn.setAttribute('aria-label', `Remove pattern ${idx+1}`);
+    delBtn.onclick = () => removePattern(idx);
+    wrapper.appendChild(grid);
+    wrapper.appendChild(label);
+    wrapper.appendChild(delBtn);
+    area.appendChild(wrapper);
+  });
+  document.getElementById('pattern-count').textContent = `${storedPatterns.length}/4`;
+  // Update noise source options
+  const sel = document.getElementById('noise-source');
+  while (sel.options.length > 0) sel.remove(0);
+  storedPatterns.forEach((_, i) => {
+    const opt = new Option(`Pattern ${i+1}`, i);
+    sel.add(opt);
+  });
+}
+
+// ─── HOPFIELD LEARNING (Hebb rule) ────────────────────────────────────
+function computeWeights() {
+  weightMatrix = new Array(N * N).fill(0);
+  const M = storedPatterns.length;
+  if (M === 0) return;
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      if (i === j) { weightMatrix[i*N+j] = 0; continue; }
+      let w = 0;
+      for (let mu = 0; mu < M; mu++) {
+        w += storedPatterns[mu][i] * storedPatterns[mu][j];
+      }
+      weightMatrix[i*N+j] = w / N;
+    }
+  }
+  renderWeightMatrix();
+}
+
+function storePattern() {
+  if (storedPatterns.length >= 4) { alert('Maximum 4 patterns'); return; }
+  const pat = [...drawState];
+  storedPatterns.push(pat);
+  computeWeights();
+  renderStoredPatterns();
+}
+
+function removePattern(idx) {
+  storedPatterns.splice(idx, 1);
+  computeWeights();
+  renderStoredPatterns();
+}
+
+function clearAllPatterns() {
+  storedPatterns = [];
+  weightMatrix = new Array(N * N).fill(0);
+  renderStoredPatterns();
+  renderWeightMatrix();
+}
+
+// ─── NOISE & RECALL ──────────────────────────────────────────────────
+function addNoise() {
+  if (storedPatterns.length === 0) { alert('Store at least one pattern first'); return; }
+  const srcIdx = parseInt(document.getElementById('noise-source').value);
+  const noisePct = parseInt(document.getElementById('noise-slider').value) / 100;
+  const src = storedPatterns[srcIdx] || storedPatterns[0];
+  noisyInput = [...src];
+  recallState = [...src];
+  for (let i = 0; i < N; i++) {
+    if (Math.random() < noisePct) noisyInput[i] *= -1;
+  }
+  recallState = [...noisyInput];
+  renderRecallGrid();
+  renderMiniGrid('compare-target', src);
+  renderMiniGrid('compare-input', noisyInput);
+  renderMiniGrid('compare-recalled', recallState);
+  energyHistory = [];
+  stepCount = 0;
+  document.getElementById('step-count').textContent = 0;
+  document.getElementById('energy-val').textContent = computeEnergy(recallState).toFixed(3);
+  document.getElementById('converged-label').classList.add('hidden');
+  document.getElementById('recall-status').textContent = 'Ready to run';
+  drawEnergyPlot();
+}
+
+function computeEnergy(s) {
+  let E = 0;
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      E -= 0.5 * weightMatrix[i*N+j] * s[i] * s[j];
+    }
+  }
+  return E;
+}
+
+function computeLocalField(s, i) {
+  let h = 0;
+  for (let j = 0; j < N; j++) {
+    h += weightMatrix[i*N+j] * s[j];
+  }
+  return h;
+}
+
+function sign(x) { return x >= 0 ? 1 : -1; }
+
+function updateSync(s) {
+  const newS = [...s];
+  for (let i = 0; i < N; i++) {
+    newS[i] = sign(computeLocalField(s, i));
+  }
+  return newS;
+}
+
+function updateAsync(s) {
+  const newS = [...s];
+  // Random order
+  const order = Array.from({length:N}, (_,i)=>i).sort(() => Math.random()-0.5);
+  order.forEach(i => {
+    newS[i] = sign(computeLocalField(newS, i));
+  });
+  return newS;
+}
+
+function arraysEqual(a, b) {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function getSpeed() {
+  const v = parseInt(document.getElementById('speed-slider').value);
+  return Math.round(600 / v); // ms per step
+}
+
+function runRecall() {
+  if (storedPatterns.length === 0) { alert('No patterns stored'); return; }
+  if (recallRunning) return;
+  recallRunning = true;
+  document.getElementById('run-btn').disabled = true;
+  document.getElementById('converged-label').classList.add('hidden');
+
+  function step() {
+    if (!recallRunning) return;
+    const mode = document.getElementById('update-mode').value;
+    const prev = [...recallState];
+    recallState = mode === 'sync' ? updateSync(recallState) : updateAsync(recallState);
+
+    // Update display
+    for (let i = 0; i < N; i++) {
+      updateGridCell('recall-grid', i, recallState[i]);
+    }
+    renderMiniGrid('compare-recalled', recallState);
+
+    stepCount++;
+    document.getElementById('step-count').textContent = stepCount;
+    const E = computeEnergy(recallState);
+    energyHistory.push(E);
+    document.getElementById('energy-val').textContent = E.toFixed(3);
+    drawEnergyPlot();
+
+    if (arraysEqual(prev, recallState) || stepCount > 200) {
+      recallRunning = false;
+      document.getElementById('run-btn').disabled = false;
+      document.getElementById('converged-label').classList.remove('hidden');
+      document.getElementById('recall-status').textContent = `Converged after ${stepCount} steps`;
+      checkMatch();
+      return;
+    }
+    recallTimer = setTimeout(step, getSpeed());
+  }
+  step();
+}
+
+function stopRecall() {
+  recallRunning = false;
+  if (recallTimer) clearTimeout(recallTimer);
+  document.getElementById('run-btn').disabled = false;
+  document.getElementById('recall-status').textContent = 'Stopped';
+}
+
+function resetRecall() {
+  stopRecall();
+  recallState = new Array(N).fill(-1);
+  renderRecallGrid();
+  energyHistory = [];
+  stepCount = 0;
+  document.getElementById('step-count').textContent = 0;
+  document.getElementById('energy-val').textContent = '—';
+  document.getElementById('converged-label').classList.add('hidden');
+  document.getElementById('recall-status').textContent = '';
+  drawEnergyPlot();
+}
+
+function checkMatch() {
+  let bestMatch = -1, bestIdx = -1;
+  storedPatterns.forEach((pat, idx) => {
+    let matches = 0;
+    for (let i = 0; i < N; i++) if (pat[i] === recallState[i]) matches++;
+    const frac = matches / N;
+    if (frac > bestMatch) { bestMatch = frac; bestIdx = idx; }
+  });
+  const el = document.getElementById('match-label');
+  if (bestMatch >= 0.9) {
+    el.textContent = `✓ Matched Pattern ${bestIdx+1} (${Math.round(bestMatch*100)}%)`;
+    el.className = 'text-xs font-bold text-green-400';
+  } else {
+    el.textContent = `Closest: Pattern ${bestIdx+1} (${Math.round(bestMatch*100)}%)`;
+    el.className = 'text-xs font-bold text-yellow-400';
+  }
+}
+
+// ─── ENERGY PLOT ─────────────────────────────────────────────────────
+function drawEnergyPlot() {
+  const canvas = document.getElementById('energy-canvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = '#111827';
+  ctx.fillRect(0, 0, W, H);
+
+  if (energyHistory.length < 2) {
+    ctx.fillStyle = '#6b7280';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Run recall to see energy convergence', W/2, H/2);
+    return;
+  }
+
+  const pad = {l:40, r:10, t:10, b:30};
+  const cW = W - pad.l - pad.r;
+  const cH = H - pad.t - pad.b;
+
+  const minE = Math.min(...energyHistory);
+  const maxE = Math.max(...energyHistory);
+  const eRange = maxE - minE || 1;
+
+  function xOf(i) { return pad.l + (i / (energyHistory.length - 1)) * cW; }
+  function yOf(e) { return pad.t + (1 - (e - minE) / eRange) * cH; }
+
+  // Grid lines
+  ctx.strokeStyle = '#1f2937';
+  ctx.lineWidth = 1;
+  for (let gy = 0; gy <= 4; gy++) {
+    const y = pad.t + gy * cH / 4;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+  }
+
+  // Axes
+  ctx.strokeStyle = '#374151';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, H - pad.b);
+  ctx.moveTo(pad.l, H - pad.b); ctx.lineTo(W - pad.r, H - pad.b);
+  ctx.stroke();
+
+  // Labels
+  ctx.fillStyle = '#9ca3af';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(maxE.toFixed(1), pad.l - 4, pad.t + 4);
+  ctx.fillText(minE.toFixed(1), pad.l - 4, H - pad.b);
+  ctx.textAlign = 'center';
+  ctx.fillText('steps', W/2, H - 2);
+
+  // Energy curve
+  ctx.strokeStyle = '#fbbf24';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  energyHistory.forEach((e, i) => {
+    const x = xOf(i), y = yOf(e);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Dot at last point
+  const lastX = xOf(energyHistory.length - 1);
+  const lastY = yOf(energyHistory[energyHistory.length - 1]);
+  ctx.fillStyle = '#fbbf24';
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ─── WEIGHT MATRIX HEATMAP ────────────────────────────────────────────
+function renderWeightMatrix() {
+  const canvas = document.getElementById('weight-canvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#111827';
+  ctx.fillRect(0, 0, W, H);
+
+  if (storedPatterns.length === 0) {
+    ctx.fillStyle = '#6b7280';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Store patterns to see weight matrix', W/2, H/2);
+    return;
+  }
+
+  const cellW = W / N, cellH = H / N;
+  const maxW = Math.max(...weightMatrix.map(Math.abs)) || 1;
+
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      const w = weightMatrix[i*N+j];
+      const norm = w / maxW; // -1 to 1
+      let r, g, b;
+      if (norm > 0) {
+        r = Math.round(norm * 99 + 67);
+        g = Math.round(norm * 45 + 56);
+        b = Math.round(norm * 110 + 145);
+      } else {
+        const a = Math.abs(norm);
+        r = Math.round(a * 185 + 31);
+        g = Math.round(a * 10 + 41);
+        b = Math.round(a * 10 + 55);
+      }
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(j * cellW, i * cellH, cellW, cellH);
+    }
+  }
+  // Grid lines
+  ctx.strokeStyle = '#374151';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i <= N; i++) {
+    ctx.beginPath(); ctx.moveTo(i * cellW, 0); ctx.lineTo(i * cellW, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i * cellH); ctx.lineTo(W, i * cellH); ctx.stroke();
+  }
+}
+
+// ─── SLIDER EVENTS ───────────────────────────────────────────────────
+document.getElementById('noise-slider').addEventListener('input', e => {
+  document.getElementById('noise-val').textContent = e.target.value + '%';
+});
+document.getElementById('speed-slider').addEventListener('input', e => {
+  document.getElementById('speed-val').textContent = e.target.value;
+});
+
+// ─── INIT ─────────────────────────────────────────────────────────────
+renderDrawGrid();
+renderRecallGrid();
+renderStoredPatterns();
+renderWeightMatrix();
+drawEnergyPlot();
+
+// Add two example patterns on load
+loadPreset('X');
+storePattern();
+loadPreset('plus');
+storePattern();
+clearDraw();
+addNoise();
+</script>
+</body>
+</html>
